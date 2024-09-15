@@ -1,10 +1,9 @@
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Stars, Text, Html } from '@react-three/drei';
-import { Physics, useBox, useSphere, usePlane } from '@react-three/cannon';
-import { Suspense } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, Stars, Html } from '@react-three/drei';
+import { Physics, useBox, useSphere } from '@react-three/cannon';
+import { Suspense, useRef, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import Head from 'next/head';
-import Footer from '../components/Footer'; // Correct path for a components folder
 import Spline from '@splinetool/react-spline';
 
 // Loader Component
@@ -37,10 +36,10 @@ function Loader() {
 
 // Create a physics-enabled box
 function PhysicsBox() {
-  const [ref] = useBox(() => ({ mass: 1, position: [2, 0, 0] }));
+  const [ref] = useBox(() => ({ mass: -1, position: [2, 2, 0] }));
 
   return (
-    <mesh ref={ref} position={[2, 0, 0]}>
+    <mesh ref={ref} position={[2, 2, 0]}>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial color="skyblue" />
     </mesh>
@@ -49,41 +48,109 @@ function PhysicsBox() {
 
 // Create a physics-enabled sphere
 function PhysicsSphere() {
-  const [ref] = useSphere(() => ({ mass: 1, position: [-2, 2, 0] }));
+  const [ref] = useSphere(() => ({ mass: -1, position: [-2, 3, 0] }));
 
   return (
-    <mesh ref={ref} position={[-2, 2, 0]}>
+    <mesh ref={ref} position={[-2, 3, 0]}>
       <sphereGeometry args={[1, 32, 32]} />
       <meshStandardMaterial color="lightgreen" />
     </mesh>
   );
 }
 
-// Create a static ground plane
-function GroundPlane() {
-  const [ref] = usePlane(() => ({ rotation: [-Math.PI / 2, 0, 0], position: [0, -1, 0] }));
-  return (
-    <mesh ref={ref} position={[0, -1, 0]}>
-      <planeGeometry args={[1000000, 1000000]} />
-      <meshStandardMaterial color="grey" />
-    </mesh>
-  );
-}
+// Spline 3D Model outside the Canvas, rendered in the top-right corner
+function SplineModel({ isModelActive, toggleModelActive }) {
+  const handleModelClick = () => {
+    toggleModelActive((prev) => !prev); // Toggle model activation
+  };
 
-// Spline 3D Model - Positioned outside of the Canvas
-function SplineModel() {
   return (
-    <div style={{ position: 'absolute', top: '0', left: '0', zIndex: '10', width: '100%', height: '100%' }}>
-      <Suspense fallback={<Loader />}>
-        <Spline scene="https://prod.spline.design/XOjm2eEE6-s3A1nX/scene.splinecode" />
-      </Suspense>
+    <div
+      style={{
+        position: 'fixed',
+        top: '10px', // Adjust this value as needed to position the model
+        right: '10px', // Adjust this value as needed to position the model
+        width: '225%', // Control the width and height of the 3D model container
+        height: '225%',
+        pointerEvents: 'none', // Ensure it's visible but doesn't block other interactions
+        zIndex: 2, // Ensure it's above other content
+      }}
+      onClick={handleModelClick} // Toggle active state on click
+    >
+      <div style={{ pointerEvents: 'auto' }}> {/* Enable pointer events for interactions */}
+        <Suspense fallback={<Loader />}>
+          <Spline scene="https://prod.spline.design/XOjm2eEE6-s3A1nX/scene.splinecode" />
+        </Suspense>
+      </div>
     </div>
   );
 }
 
-export default function Home() {
+function Scene({ isModelActive }) {
+  const { camera } = useThree();
+  const controlsRef = useRef();
+
+  useEffect(() => {
+    // Set the camera position and controls target to frame both the sphere and the box
+    camera.position.set(0, 30, 10); // Position the camera further back and slightly above
+    controlsRef.current.target.set(0, 1, 0); // Focus on the midpoint
+    controlsRef.current.update();
+
+    // Scroll event listener for zooming in/out
+    const handleScroll = (event) => {
+      event.preventDefault(); // Prevent default page scroll
+      if (isModelActive) {
+        // Only apply zoom to the 3D model when it's active
+        camera.position.z -= event.deltaY * 0.05; // Adjust zoom speed for 3D model
+      } else {
+        // Apply zoom to the stars scene when the model is not active
+        camera.position.z -= event.deltaY * 0.02; // Adjust zoom for stars scene
+      }
+
+      // Limit the camera zoom-in and zoom-out range
+      camera.position.z = Math.max(20, Math.min(camera.position.z, 100)); // Adjust the min/max range to suit your needs
+    };
+
+    // Add scroll event listener
+    window.addEventListener('wheel', handleScroll, { passive: false });
+
+    // Clean up event listener on component unmount
+    return () => {
+      window.removeEventListener('wheel', handleScroll);
+    };
+  }, [camera, isModelActive]);
+
   return (
-    <div className="relative min-h-screen bg-gradient-to-b from-purple-900 to-blue-800 text-white">
+    <>
+      {/* Global OrbitControls for zooming and rotating */}
+      <OrbitControls
+        ref={controlsRef}
+        enableZoom={false} // Disable default zoom to handle custom zoom
+        maxDistance={300} // Allows zooming out further
+        minDistance={10} // Sets minimum zoom distance
+        maxPolarAngle={Math.PI / 2} // Restricts vertical rotation
+        target={[0, 1, 0]} // Ensures camera targets the midpoint between the objects
+      />
+      <ambientLight intensity={0.5} />
+      <pointLight position={[10, 10, 10]} intensity={1} color={'white'} />
+
+      {/* Stars in the background */}
+      <Stars radius={200} depth={50} count={5000} factor={4} saturation={0} fade />
+
+      {/* Physics-enabled elements */}
+      <Physics>
+        <PhysicsSphere />
+        <PhysicsBox />
+      </Physics>
+    </>
+  );
+}
+
+export default function Home() {
+  const [isModelActive, setIsModelActive] = useState(false); // State to track if 3D model is active
+
+  return (
+    <div className="relative min-h-screen bg-gradient-to-b from-purple-900 to-blue-800 text-white overflow-hidden">
       <Head>
         <title>3D Interactive Portfolio</title>
       </Head>
@@ -98,44 +165,19 @@ export default function Home() {
           Explore My 3D World
         </motion.h1>
 
-        {/* Spline Model */}
-        <SplineModel />
-
-        {/* Three.js Canvas */}
+        {/* Canvas containing the 3D scene with global controls */}
         <div className="w-full h-screen relative">
-          <Canvas className="w-full h-full" camera={{ position: [0, 10, 20], fov: 75 }}>
+          <Canvas
+            camera={{ position: [0, 30, 10], fov: 70, near: 0.1, far: 10000 }} // Adjust the far value here
+          >
             <Suspense fallback={<Loader />}>
-              <OrbitControls 
-                enableZoom={true} 
-                maxDistance={100} // Adjust to allow zooming out further
-                minDistance={5}   // Adjust to avoid too much zoom in
-                target={[0, 0, 0]} // Focus on the center of the scene
-                dampingFactor={0.1} // Add smooth damping
-              />
-              <ambientLight intensity={0.5} />
-              <pointLight position={[10, 10, 10]} intensity={1} color={'white'} />
-              <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade />
-
-              <Physics>
-                <GroundPlane />
-                <PhysicsSphere />
-                <PhysicsBox />
-              </Physics>
-              <Text
-                position={[0, -2, 0]}
-                color="white"
-                fontSize={0.5}
-                maxWidth={200}
-                lineHeight={1}
-                letterSpacing={0.02}
-                textAlign="center"
-                font="https://fonts.gstatic.com/s/roboto/v20/KFOmCnqEu92Fr1Me5Q.ttf"
-              >
-                Welcome to My Interactive 3D Portfolio
-              </Text>
+              <Scene isModelActive={isModelActive} />
             </Suspense>
           </Canvas>
         </div>
+
+        {/* Spline model rendered outside the Canvas, fixed in the top-right corner */}
+        <SplineModel isModelActive={isModelActive} toggleModelActive={setIsModelActive} />
 
         {/* Call to Action */}
         <motion.div
